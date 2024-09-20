@@ -1,4 +1,4 @@
-models downloaded from internet, plz use this project for learning only.
+models downloaded from internet, for learning only.
 some bugs not fixed yet.
 
 below are the websites where models come from, respect for the makers:
