@@ -1,0 +1,916 @@
+/*
+using System.Collections;
+using System.Collections.Generic;
+using TMPro;
+using Unity.VisualScripting;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class PlayerInput : MonoBehaviour
+{
+    public GameObject hero;
+    public GameObject startPoint;
+    public Camera camera;
+    private Rigidbody rb;
+    private Animator _animator;
+
+    private bool isMoving;
+    Vector3 destPoint;
+    [SerializeField] private float rotationSpeed;
+    [SerializeField] private float moveSpeed;
+
+    public Texture2D cursor1;
+    public Texture2D cursor2;
+
+    private bool inputEnabled;
+
+    public float inputDelay;
+    public float qSkillCD;
+    private bool qSkillEnabled;
+
+    private LineRenderer lineRenderer;
+
+
+    public List<AudioClip> qskillFisrtClips;
+    public List<AudioClip> qskillSecondClips;
+    public List<AudioClip> qskillThirdClips;
+    private List<List<AudioClip>> qskillClips;
+    private AudioSource audioSource;
+
+    private int SkillRealeaseCnter;
+
+    private List<string> attackAnimations;
+    [SerializeField] private float attackSpeed;
+    private float attackCd;
+    private float attackTimer;
+    private int attackAnimationIndex;
+    private bool ifAttackContinuos;
+
+    private bool ifEnabled;
+
+    [SerializeField] private GameObject attackRangeIndicator;
+
+    public TextMeshProUGUI eSkillInfo;
+
+    public GameObject windWall;
+
+    private bool ifESkilling;
+
+
+    // 采用技能类
+    [SerializeField]private QSkill _qSkill;
+
+
+
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        qskillClips = new List<List<AudioClip>>() {
+            qskillFisrtClips, 
+            qskillSecondClips, 
+            qskillThirdClips};
+        Vector3 offset = camera.transform.position - startPoint.transform.position;
+        //Debug.Log($"offset = {offset}");
+        hero.transform.position = startPoint.transform.position; 
+
+        rb = hero.GetComponent<Rigidbody>();
+        _animator = hero.GetComponent<Animator>();
+
+        isMoving = false;
+        Cursor.SetCursor(cursor1, Vector2.zero, CursorMode.Auto);
+
+        inputEnabled = true;
+        qSkillEnabled = true;
+
+        hero.gameObject.AddComponent<LineRenderer>();
+
+        lineRenderer = hero.gameObject.GetComponent<LineRenderer>();
+
+        audioSource = gameObject.GetComponent<AudioSource>();
+
+        SkillRealeaseCnter = 0;
+
+        attackAnimations = new List<string>() { 
+            "yasuo_attack1",
+            "yasuo_attack2",
+            "yasuo_attack3",
+            "yasuo_attack4",};
+
+        attackCd = 1 / attackSpeed;
+        //Debug.Log($"attackcd = {attackCd}");
+        attackTimer = 0;
+        attackAnimationIndex = 0;
+        ifAttackContinuos = false;
+
+        ifEnabled = true;
+        ifESkilling = false;
+
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if(inputEnabled == true)
+        {// 处理所有输入
+            if (Input.GetMouseButtonDown(1))
+            {
+                _animator.SetBool("STAYDANCING", false);
+                _animator.SetBool("DANCE3", false);
+                Ray ray = camera.ScreenPointToRay(Input.mousePosition);
+                RaycastHit hit;
+                if (Physics.Raycast(ray, out hit))
+                {
+                    destPoint = hit.point;
+                    if (isMoving == false)
+                    {
+                        isMoving = true;
+                        _animator.SetBool("MOVE", true);
+                        ifAttackContinuos = false;
+                    }
+                }
+            }
+
+            if (Input.GetKeyDown(KeyCode.S))
+            {
+                ifAttackContinuos = false;
+                isMoving = false;
+                _animator.SetBool("MOVE", false);
+                _animator.SetBool("STAYDANCING", false);
+                _animator.SetBool("DANCE3", false);
+            }
+
+            if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.Q))
+            {   // dance input
+                if (isMoving == true)
+                {
+                    isMoving = false;
+
+                }
+                _animator.SetBool("STAYDANCING", true);
+                _animator.SetBool("DANCE3", true);
+                ifAttackContinuos = false;
+            }
+
+            if(Input.GetKeyDown(KeyCode.A))
+            {
+                attackRangeIndicator.SetActive(true);
+                if(ifEnabled == true)
+                {// 需要一个变量来指示，该次普攻有没有被打断
+                    if(ifAttackContinuos == true)
+                    {
+                        attackAnimationIndex += 1;
+                        if(attackAnimationIndex > 3)
+                        {
+                            attackAnimationIndex = 0;
+                        }
+                    }
+                    else
+                    {
+                        attackAnimationIndex = 0;
+                    }
+                    string targetAttackAnimation = attackAnimations[attackAnimationIndex];
+                    _animator.speed = attackSpeed;
+                    _animator.Play(targetAttackAnimation);
+
+                    StartCoroutine(AttackCoolDown(attackCd));
+                }
+                else
+                {
+                    ifAttackContinuos = true;
+                }
+
+            }
+
+            if(Input.GetKeyUp(KeyCode.A))
+            {
+                attackRangeIndicator.SetActive(false);
+            }
+
+            if (Input.GetKeyDown(KeyCode.Q) && qSkillEnabled == true)
+            {
+                isMoving = false;
+                _animator.SetBool("MOVE", false);
+                StartCoroutine(DisableInputForSeconds(inputDelay));
+                StartCoroutine(QSkillCDTimer(qSkillCD));
+                //_animator.SetTrigger("QSKILL");
+                if(_qSkill != null)
+                {
+                    Debug.Log("Qskill instance not null");
+                }
+                else
+                {
+                    Debug.Log("Qskill instance null");
+                }
+                if (_qSkill.SkillAnimationNames.Count > 0)
+                {
+                    Debug.Log("Skill names not null");
+                    _animator.Play(_qSkill.SkillAnimationNames[0]);
+                }
+                else
+                {
+                    Debug.Log("Skill names null");
+                }
+
+
+                QSkillRay();
+
+                int index = Random.Range(0, qskillClips[SkillRealeaseCnter].Count);
+                audioSource.clip = qskillClips[SkillRealeaseCnter][index];
+                audioSource.Play();
+                Debug.Log($"QreleaseCnt->{SkillRealeaseCnter}\n" +
+                    $"index = {index}\n" +
+                    $"qskillClips[SkillRealeaseCnter].Count = {qskillClips[SkillRealeaseCnter].Count}");
+
+                SkillRealeaseCnter += 1;
+                if (SkillRealeaseCnter >= 3)
+                {
+                    SkillRealeaseCnter = 0;
+                }
+
+                ifAttackContinuos = false;
+
+                // start cool down
+            }
+
+            if (Input.GetKeyDown(KeyCode.W))
+            {
+                windWall.SetActive(true);
+                StartCoroutine(WindWallKeeper());
+            }
+
+            if (Input.GetKeyDown(KeyCode.E))
+            {   // need more  conditions; presume conditiions are all correct
+                ifESkilling = true;
+                isMoving = false;
+                destPoint = hero.transform.forward * 300;
+                destPoint += hero.transform.position;
+                _animator.Play("yasuo_ESkill");
+                //eSkillInfo.text = "E Skill is not Ready";
+                //ESkill();
+            }
+            if (Input.GetKeyUp(KeyCode.E))
+            {
+                eSkillInfo.text = "";
+            }
+
+            if(Input.GetKeyDown(KeyCode.R))
+            {
+                _animator.Play("yasuo_RSkill");
+            }
+
+
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+#if UNITY_EDITOR
+                EditorApplication.ExitPlaymode();
+#else
+            Application.Quit();
+#endif
+            }
+        }
+        
+    }
+
+    void FixedUpdate()
+    {
+        if(isMoving || ifESkilling){
+            Vector3 direction = (destPoint - rb.position).normalized;
+
+            // 计算目标旋转
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+
+            // 平滑旋转
+            rb.rotation = Quaternion.Slerp(rb.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+
+            // 平滑移动
+            Vector3 newPosition = Vector3.MoveTowards(rb.position, destPoint, moveSpeed * Time.fixedDeltaTime);
+            rb.MovePosition(newPosition);
+
+            // 检查物体是否已经到达目标点
+            if (Vector3.Distance(rb.position, destPoint) < 0.1f)
+            {
+                isMoving = false; // 停止移动
+                ifESkilling = false;
+                _animator.SetBool("MOVE", false);
+                //SetAnimatorSpeed(0f); // 设置动画控制器的SPEED为0
+            }
+        }
+    }
+
+    void Attack()
+    {
+        string targetAttackAnimation = attackAnimations[attackAnimationIndex];
+        _animator.Play(targetAttackAnimation);
+    }
+
+    void QSkillRay()
+    {
+        float rayLength = 300f; // 射线的长度
+        float rayWidth = 80f;   // 射线的宽度
+        
+        lineRenderer.startWidth = rayWidth;
+        lineRenderer.endWidth = rayWidth;
+        lineRenderer.positionCount = 2;
+        lineRenderer.material = new Material(Shader.Find("Sprites/Default")); // 为了简单可见，使用一个简单的材质
+        lineRenderer.startColor = Color.red;
+        lineRenderer.endColor = Color.red;
+
+        Vector3 startPoint = hero.transform.position;
+        Vector3 direction = hero.transform.forward;
+        Vector3 endPoint = startPoint + direction * rayLength;
+
+        // 绘制射线
+        lineRenderer.SetPosition(0, startPoint);
+        lineRenderer.SetPosition(1, endPoint);
+
+    }
+
+    private void ESkill()
+    {
+        Vector3 eDestPoint = hero.transform.forward * 300;
+        eDestPoint += hero.transform.position;
+        rb.MovePosition(eDestPoint);
+    }
+
+    private IEnumerator DisableInputForSeconds(float seconds)
+    {
+        inputEnabled = false;
+        yield return new WaitForSeconds(seconds);
+        inputEnabled = true;
+    }
+
+    private IEnumerator QSkillCDTimer(float cd)
+    {
+        qSkillEnabled = false;
+        yield return new WaitForSeconds(cd);
+        qSkillEnabled = true;
+    }
+
+    private IEnumerator AttackCoolDown(float cd)
+    {
+        ifEnabled = false;
+        yield return new WaitForSeconds(cd);
+        ifEnabled = true;
+    }
+
+    private IEnumerator WindWallKeeper()
+    {
+        yield return new WaitForSeconds(3);
+        windWall.SetActive(false);
+    }
+}
+
+*/
+////////////////////////////////////////////////////
+
+using System.Collections;
+using System.Collections.Generic;
+using TMPro;
+using Unity.VisualScripting;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class PlayerInput : MonoBehaviour
+{
+    public GameObject hero;
+    public GameObject startPoint;
+    public Camera camera;
+    private Rigidbody rb;
+    private Animator animator;
+
+    private bool isMoving;
+    Vector3 destPoint;
+    [SerializeField] private float rotationSpeed;
+    [SerializeField] private float moveSpeed;
+
+    public Texture2D cursor1;
+    public Texture2D cursor2;
+
+    private bool inputEnabled;
+
+    public TextMeshProUGUI eSkillInfo;
+
+    // 采用技能类 -- 普攻、舞蹈都看作可以释放的技能
+    [SerializeField] private Attack _attack;
+    [SerializeField] private QSkill _qSkill;
+    [SerializeField] private WSkill _wSkill;
+    [SerializeField] private ESkill _eSkill;
+    [SerializeField] private RSkill _rSkill;
+    private Dance _dance;
+    private bool _ifESkilling; // 是否在E技能途中？为了实现EQ连放
+    private bool isSwordOut;
+
+    public bool IfESkilling
+    {
+        get { return _ifESkilling;}
+        set { _ifESkilling = value;}
+    }
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        hero.transform.position = startPoint.transform.position;
+        rb = hero.GetComponent<Rigidbody>();
+        animator = hero.GetComponent<Animator>();
+
+        isMoving = false;   // 游戏刚开始，角色没有移动
+        Cursor.SetCursor(cursor1, Vector2.zero, CursorMode.Auto);
+
+        inputEnabled = true;
+        _dance = gameObject.AddComponent<Dance>();
+
+        _ifESkilling = false;// 没有放E技能
+        isSwordOut = false; // A Q W R都会让剑出鞘，还要检测什么时候剑回鞘
+    }
+
+    // 输入-》技能、舞蹈、普攻等等，分为可打断类型与不可打断类型
+    // 不可打断的只有技能：需要完整释放（暂时不考虑沉默与禁锢、击飞等控制效果）
+    // 不可打断的输入，需要等待该次动作释放完毕之后才能继续下一个输入，也就是需要一个输入禁止功能
+    // 其余的无关紧要的输入，比如舞蹈、普攻都可以中途被打断
+    // Update is called once per frame
+    void Update()
+    {
+        if(inputEnabled == false && _ifESkilling && Input.GetKeyDown(KeyCode.Q))
+        {   // eq
+            Debug.Log("EQ");
+            _qSkill.Release(this.animator, this, this.hero);
+            isSwordOut = true;
+        }
+
+        if (inputEnabled == true)
+        {// 处理所有输入
+            // 移动
+            if (Input.GetMouseButtonDown(1))
+            {   // 检查剑出鞘的情况，如果出鞘了，就要播放剑出鞘的动画
+                // animator.SetBool("RUN", true);
+                animator.SetBool("STAYDANCING", false);
+                animator.SetBool("DANCE3", false);
+
+                Ray ray = camera.ScreenPointToRay(Input.mousePosition);
+                RaycastHit hit;
+                if(Physics.Raycast(ray, out hit))
+                {
+                    destPoint = hit.point;
+
+                    if(isMoving == false)   //当前没跑
+                    {
+                        if(isSwordOut == false)// 收刀状态
+                        {
+                            // 没有出鞘，直接播放run的动画，随机选取一个播放
+                            int runAnimationIndex = Random.Range(1, 3);
+                            string runAnimtion = $"yasuo_run{runAnimationIndex}";
+                            animator.Play(runAnimtion);
+                        }
+                        else
+                        {   // 如果出鞘了，我们要从出鞘的动画开始播放起
+                            // 设定一个奔跑的循环动画
+                            int runAnimationIndex = Random.Range(1, 3);
+                            animator.SetInteger("RUNINDEX", runAnimationIndex);
+                        }
+                    }
+                    animator.SetBool("RUNNING", true);
+                    isMoving = true;
+                    _attack.IfAttackContinuos = false;
+                }
+            }
+
+            if (Input.GetKeyDown(KeyCode.S))
+            {
+                _attack.IfAttackContinuos = false;
+                isMoving = false;
+                animator.Play("yasuo_idle_in_sheathed");
+                //animator.SetBool("MOVE", false);
+                animator.SetBool("RUNNING", false);
+                animator.SetBool("STAYDANCING", false);
+                animator.SetBool("DANCE3", false);
+            }
+
+            //if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.Q))
+            if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.Alpha1))
+            {   // dance input
+                _dance.Release(this.animator, 1);
+                isMoving = false;
+                _attack.IfAttackContinuos = false;
+                //animator.SetBool("DANCE3", true);
+                //animator.SetBool("STAYDANCING", true);
+            }
+
+            // 普攻
+            if (Input.GetKeyDown(KeyCode.A))
+            {
+                isMoving = false;
+                isSwordOut = true;
+                _attack.Release(this.animator);
+            }
+
+            // input for SKILLs
+            // Q技能
+            if (Input.GetKeyDown(KeyCode.Q) && _qSkill.IfEnabled == true)
+            {
+                isMoving = false;
+                //animator.SetBool("MOVE", false);
+                animator.SetBool("RUNNING", false);
+                StartCoroutine(DisableInputForSeconds(_qSkill.SkillLength));
+                isSwordOut = true;
+                _qSkill.Release(this.animator, this, this.hero);
+                _attack.IfAttackContinuos = false;
+            }
+
+            // W技能
+            if (Input.GetKeyDown(KeyCode.W))
+            {
+                isSwordOut = true;
+                _wSkill.Release(this.animator, this.hero);
+            }
+
+            // E技能
+            if (Input.GetKeyDown(KeyCode.E))
+            {   // need more  conditions; presume conditiions are all correct
+                isMoving = true;
+                StartCoroutine(WaitForEndOfESkill(_eSkill.SkillLength));
+                StartCoroutine(DisableInputForSeconds(_eSkill.SkillLength));
+                DestPointAfterESkill();
+                _eSkill.Release(this.animator);
+            }
+
+            // R技能
+            if (Input.GetKeyDown(KeyCode.R) && _rSkill.IfEnabled == true)
+            {
+                isMoving = false;
+                isSwordOut = true;
+                _rSkill.Release(this.animator);
+                StartCoroutine(DisableInputForSeconds(_rSkill.AnimationLength));
+            }
+
+            // input escape for quit
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+#if UNITY_EDITOR
+                EditorApplication.ExitPlaymode();
+#else
+                Application.Quit();
+#endif
+            }
+        }
+
+    }
+
+    void FixedUpdate()
+    {
+        if (isMoving)
+        {
+            Vector3 direction = (destPoint - rb.position).normalized;
+
+            // 计算目标旋转
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+
+            // 平滑旋转
+            rb.rotation = Quaternion.Slerp(rb.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+
+            // 平滑移动
+            Vector3 newPosition = Vector3.MoveTowards(rb.position, destPoint, moveSpeed * Time.fixedDeltaTime);
+            rb.MovePosition(newPosition);
+
+            // 检查物体是否已经到达目标点
+            if (Vector3.Distance(rb.position, destPoint) < 0.1f)
+            {
+                isMoving = false; // 停止移动
+                switch (isSwordOut)
+                {
+                    case true:
+                        animator.Play("yasuo_idle_out");
+                        break;
+                    case false:
+                        animator.Play("yasuo_idle_in_sheathed");
+                        break;
+                }
+                animator.SetBool("RUNNING", false);
+            }
+        }
+    }
+
+    private void DestPointAfterESkill()
+    {
+        destPoint = hero.transform.forward * 300;
+        destPoint += hero.transform.position;
+    }
+
+    private IEnumerator DisableInputForSeconds(float seconds)
+    {
+        inputEnabled = false;
+        yield return new WaitForSeconds(seconds);
+        inputEnabled = true;
+    }
+
+    private IEnumerator WaitForEndOfESkill(float eSkillAnimationLength)
+    {
+        IfESkilling = true;
+        yield return new WaitForSeconds(eSkillAnimationLength);
+        IfESkilling = false;
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////
+
+using System.Collections;
+using System.Collections.Generic;
+using TMPro;
+using Unity.VisualScripting;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class PlayerInput : MonoBehaviour
+{
+    public GameObject hero;
+    public GameObject startPoint;
+    public Camera camera;
+    private Rigidbody rb;
+    private Animator animator;
+
+    private bool isMoving;
+    Vector3 destPoint;
+    [SerializeField] private float rotationSpeed;
+    [SerializeField] private float moveSpeed;
+
+    public Texture2D cursor1;
+    public Texture2D cursor2;
+
+    private bool inputEnabled;
+
+    public TextMeshProUGUI eSkillInfo;
+
+    // 采用技能类 -- 普攻、舞蹈都看作可以释放的技能
+    [SerializeField] private Attack _attack;
+    [SerializeField] private QSkill _qSkill;
+    [SerializeField] private WSkill _wSkill;
+    [SerializeField] private ESkill _eSkill;
+    [SerializeField] private RSkill _rSkill;
+    private Dance _dance;
+    private bool _ifESkilling; // 是否在E技能途中？为了实现EQ连放
+    private bool isSwordOut;
+
+    private Queue<KeyCode> inputs;
+
+    // 通过多个bool变量确定有没有释放谋个技能或者普攻
+    // 突然又想到，既然只是想确定有没有这几个中的任何一个的输入值，那完全可以都由一个变量来替代
+    private bool ifAQWERed;
+
+    public bool IfESkilling
+    {
+        get { return _ifESkilling;}
+        set { _ifESkilling = value;}
+    }
+
+    public bool IfAQWERed
+    {   // 我们需要在每个技能释放完成后，或者按下S之后，重置这个变量
+        set { ifAQWERed = value;}
+    }
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        hero.transform.position = startPoint.transform.position;
+        rb = hero.GetComponent<Rigidbody>();
+        animator = hero.GetComponent<Animator>();
+
+        isMoving = false;   // 游戏刚开始，角色没有移动
+        Cursor.SetCursor(cursor1, Vector2.zero, CursorMode.Auto);
+
+        inputEnabled = true;
+        _dance = gameObject.AddComponent<Dance>();
+
+        isSwordOut = false; // A Q W R都会让剑出鞘，还要检测什么时候剑回鞘
+
+        ifAQWERed = false; // 最初，没有任何输入
+        _ifESkilling = false;// 是否在E的期间，这个也很重要
+    }
+
+    // 输入-》技能、舞蹈、普攻等等，分为可打断类型与不可打断类型
+    // 不可打断的只有技能：需要完整释放（暂时不考虑沉默与禁锢、击飞等控制效果）
+    // 不可打断的输入，需要等待该次动作释放完毕之后才能继续下一个输入，也就是需要一个输入禁止功能
+    // 其余的无关紧要的输入，比如舞蹈、普攻都可以中途被打断
+    // Update is called once per frame
+    void Update()
+    {
+        // 我们在接收输入的时候，仍然需要考虑：输入禁止与接收的情况，否则输入就乱套了
+
+        // 出现了一个bug，当使用了技能之后，动画变了？
+        // 我们好像只是按下了 S 之后才会让动画重置各种情况
+
+        // 问题似乎出现在，我们对RUNNING的检测上，我们是只在鼠标右键移动的时候
+        // 才检测这个IFAQWERed，实际上，应该实时检测
+        
+        // 这样，我们的输入就和这个值分开了
+        // 目前，释放技能确实不会影响到移动了，但是出现了Q技能之后
+        // 角色固定移动动画的播放？？？
+        // 问题似乎出现在：我们一旦释放了技能或者普通攻击，那么，ifAQWERed变量就设置为true，然后
+        // 技能或者普攻动画结束后，它才被设置为false
+        // 那么就出现了一个情况，这个动画结束的时候，update会将animator的RUNNING变量固定设置为true的
+        // 于是就导致了，释放技能必定移动的问题，如何解决？？？
+        // 而且单纯是QWR会这样，E技能不会？？？
+        if (Input.GetMouseButtonDown(1))
+        {   // 现在，就可以根据四个技能和普攻的输入情况，来判断是否需要连续动画了
+            Ray ray = camera.ScreenPointToRay(Input.mousePosition);
+            RaycastHit hit;
+            if (Physics.Raycast(ray, out hit))
+            {
+                destPoint = hit.point;
+                if (isMoving == false)   //当前没跑
+                {
+                    if (isSwordOut == false)// 收刀状态
+                    {
+                        // 没有出鞘，直接播放run的动画，随机选取一个播放
+                        int runAnimationIndex = Random.Range(1, 3);
+                        string runAnimtion = $"yasuo_run{runAnimationIndex}";
+                        animator.Play(runAnimtion);
+                    }
+                    else // isSwordOut == true，出鞘状态
+                    {   // 如果出鞘了，我们要从出鞘的动画开始播放起
+                        // 但是，既然没有收刀，前面必定有一个状态，那我们直接就设定正在奔跑的条件就行了
+                        // 这种情况下，只设定一个奔跑的循环动画
+                        animator.Play("yasuo_run_out");
+                        int runAnimationIndex = Random.Range(1, 3);
+                        animator.SetInteger("RUNINDEX", runAnimationIndex);
+                    }
+                }
+                // 目前出现释放技能或者普攻后，奔跑动画不更新的原因是：
+                // 出鞘后，isSwordOut == true，但是同时，ifMoving == false
+                isMoving = true;
+                _attack.IfAttackContinuos = false;
+            }
+        }
+
+        if (Input.GetKeyDown(KeyCode.S))
+        {   // 按下S的时候，一定是立即停止，因为我们是在能接受输入的前提下按S的
+            // 问题就出现在，是收刀停止还是出鞘停止
+            _attack.IfAttackContinuos = false;
+            isMoving = false;
+            // 这里既然要停止，就应该是立即停止，采用直接播放停止动画，而非等待状态机的自动状态转换
+            switch (isSwordOut)
+            {
+                case true:// 如果是出刀的停止，那我们该播放哪个动画？
+                    animator.Play("yasuo_idle_out");
+                    break;
+                case false://如果是收刀的停止，又该播放哪个？
+                    animator.Play("yasuo_idle_in_sheathed");
+                    break;
+            }
+            ifAQWERed = false;  // 重置技能与普攻的输入
+            // 但是当前存在一个问题 --> 那就是这个RUNNING变量似乎没有起到什么作用
+        }
+
+        // 普攻
+        if (Input.GetKeyDown(KeyCode.A))
+        {   // 这里似乎就牵扯到了一个“是否提前接收下一个输入”的问题了
+            // 假如所有输入之后都会得到一个输入禁止，那我们无法决定动画之间的衔接
+            // 是否能够，用一个变量来指代在输入的时候
+            // 此前一个输入被哪个状态给启用了？就像_ifESkilling一样
+            ifAQWERed = true;
+            isMoving = false;
+            isSwordOut = true;
+            animator.SetBool("RUNNING", false);
+            _attack.Release(this.animator, this);
+        }
+
+        // Q技能
+        if (Input.GetKeyDown(KeyCode.Q) && _qSkill.IfEnabled == true)
+        {   // 为什么能不能放Q技能变成了要输入端来决定了？
+            // 假如Q技能在CD中，不释放不就行了？
+            // =======问题似乎就出现在这里，一旦释放了Q技能，随后，动画的RUNNING条件设定为false
+            // 之后就会出现Q技能动画一路向着IDLE的动画播放，期间我们的输入不能改变动画
+            ifAQWERed = true;
+            isMoving = false;
+            animator.SetBool("RUNNING", false);
+            // 是不是可以在释放Q技能期间检测下一个输入？？？
+            StartCoroutine(DisableInputForSeconds(_qSkill.SkillLength));
+            isSwordOut = true;  // 一旦释放Q，剑出鞘状态必定施加，没问题
+            _qSkill.Release(this.animator, this, this.hero);    //释放Q动画，没问题
+            _attack.IfAttackContinuos = false;  //暂且不管
+            
+        }
+
+        // 怎么W E就不能衔接上移动呢？？？
+
+        // W技能
+        if (Input.GetKeyDown(KeyCode.W))
+        {   // 假如移动途中释放W，那么W并不会停止移动，然后直到上个移动指令达到位置之后
+            // 才会停止状态，所以这就是问题，那我们停止其移动呢？
+            // 果然，释放W后也可以移动了
+            isMoving = false;
+            ifAQWERed = true;
+            isSwordOut = true;  // W用刀划出风墙，必定出鞘
+            _wSkill.Release(this.animator, this, this.hero);  // 释放，没问题
+        }
+
+        // E技能
+        if (Input.GetKeyDown(KeyCode.E))
+        {   // need more  conditions; presume conditiions are all correct
+            // E技能是一个很特殊的情况，E结束有收刀和不收刀两种情况
+            // 同时，E的起手也有出刀收刀两种情况
+            // 那我们需要将E技能单独提出来
+            // OK，全部解决了，下面就是输入的禁止问题，以及EQ等等了
+            // 最后就是动画的流畅衔接问题
+            isSwordOut = true;
+            ifAQWERed = true;
+            //isMoving = true;    // 将E也看作移动的一种，方便计算落点
+            isMoving = false;
+            StartCoroutine(WaitForEndOfESkill(_eSkill.SkillLength));
+            StartCoroutine(DisableInputForSeconds(_eSkill.SkillLength));
+            DestPointAfterESkill(); // 计算E的落点位置
+            _eSkill.Release(this.animator, this); // 释放E
+            // 需要讨论E期间的出鞘与否
+            
+        }
+
+        // R技能
+        if (Input.GetKeyDown(KeyCode.R) && _rSkill.IfEnabled == true)
+        {   // R技能是一个必定出刀劈砍的情况，必定出鞘
+            ifAQWERed = true;
+            isMoving = false;   // R期间不能移动
+            isSwordOut = true;  // 出鞘
+            animator.SetBool("RUNNING", false);
+            _rSkill.Release(this.animator, this); // 释放R
+            StartCoroutine(DisableInputForSeconds(_rSkill.AnimationLength));
+            // R期间禁止输入，防止出问题，并且R期间也不需要什么输入
+        }
+
+        // 退出游戏模式
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+#if UNITY_EDITOR
+            EditorApplication.ExitPlaymode();
+#else
+                Application.Quit();
+#endif
+        }
+
+        // 先不管EQ
+        //if (inputEnabled == false && _ifESkilling && Input.GetKeyDown(KeyCode.Q))
+        //{   // eq
+        //    Debug.Log("EQ");
+        //    _qSkill.Release(this.animator, this, this.hero);
+        //    isSwordOut = true;
+        //}
+
+    }
+
+    void FixedUpdate()
+    {
+        //animator.SetBool("RUNNING", ifAQWERed);// ***************
+        if (isMoving || IfESkilling)
+        {
+            Vector3 direction = (destPoint - rb.position).normalized;
+            // 计算目标旋转
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+            // 平滑旋转
+            rb.rotation = Quaternion.Slerp(rb.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+            // 平滑移动
+            Vector3 newPosition = Vector3.MoveTowards(rb.position, destPoint, moveSpeed * Time.fixedDeltaTime);
+            rb.MovePosition(newPosition);
+
+            // 检查物体是否已经到达目标点
+            if (Vector3.Distance(rb.position, destPoint) < 0.1f)
+            {
+                animator.SetBool("RUNNING", false);
+                isMoving = false; // 停止移动
+                switch (isSwordOut)
+                {
+                    case true:
+                        animator.Play("yasuo_idle_out");
+                        break;
+                    case false:
+                        animator.Play("yasuo_idle_in_sheathed");
+                        break;
+                }
+            }
+        }
+    }
+
+    private void DestPointAfterESkill()
+    {
+        destPoint = hero.transform.forward * 300;
+        destPoint += hero.transform.position;
+    }
+
+    private IEnumerator DisableInputForSeconds(float seconds)
+    {
+        inputEnabled = false;
+        yield return new WaitForSeconds(seconds);
+        inputEnabled = true;
+    }
+
+    private IEnumerator WaitForEndOfESkill(float eSkillAnimationLength)
+    {
+        IfESkilling = true;
+        yield return new WaitForSeconds(eSkillAnimationLength);
+        IfESkilling = false;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////
+
